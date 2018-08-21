@@ -135,6 +135,86 @@ func resourceBigQueryDataset() *schema.Resource {
 				Type:     schema.TypeInt,
 				Computed: true,
 			},
+
+			// Access: [Optional] An array of objects that define dataset access for
+			// one or more entities. You can set this property when inserting or
+			// updating a dataset in order to control who is allowed to access the data.
+			// If unspecified at dataset creation time, BigQuery adds default dataset
+			// access for the following entities:
+			// - access.specialGroup: projectReaders; access.role: READER;
+			// - access.specialGroup: projectWriters; access.role: WRITER;
+			// - access.specialGroup: projectOwners; access.role: OWNER;
+			// - access.userByEmail: [dataset creator email]; access.role: OWNER;
+			"access": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						// [Required] Describes the rights granted to the user specified
+						// by the other member of the access object. The following string
+						// values are supported: READER, WRITER, OWNER.
+						"role": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						// [Pick one] An email address of a user to grant access to.
+						"user_by_email": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						// [Pick one] An email address of a Google Group to grant access to.
+						"group_by_email": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						// [Pick one] A domain to grant access to. Any users signed in with
+						// the domain specified will be granted the specified access.
+						"domain": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						// [Pick one] A special group to grant access to. Possible values include:
+						// - projectOwners: Owners of the enclosing project.
+						// - projectReaders: Readers of the enclosing project.
+						// - projectWriters: Writers of the enclosing project.
+						// - allAuthenticatedUsers: All authenticated BigQuery users.
+						"special_group": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						// [Pick one] A view from a different dataset to grant access to.
+						// Queries executed against that view will have read access to tables in this
+						// dataset. The role field is not required when this field is set. If that
+						// view is updated by any user, access to the view needs to be granted
+						// again via an update operation.
+						"view": {
+							Type:     schema.TypeMap,
+							Optional: true,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									// [Required] The ID of the dataset containing this table.
+									"dataset_id": {
+										Type:     schema.TypeString,
+										Required: true,
+									},
+									// [Required] The ID of the project containing this table.
+									"project_id": {
+										Type:     schema.TypeString,
+										Required: true,
+									},
+									// [Required] The ID of the table. The ID must contain only
+									// letters (a-z, A-Z), numbers (0-9), or underscores (_).
+									// The maximum length is 1,024 characters.
+									"table_id": {
+										Type:     schema.TypeString,
+										Required: true,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 }
@@ -178,6 +258,10 @@ func resourceDataset(d *schema.ResourceData, meta interface{}) (*bigquery.Datase
 		}
 
 		dataset.Labels = labels
+	}
+
+	if v, ok = d.GetOk("access"); ok {
+		dataset.Access = expandAccessList(v)
 	}
 
 	return dataset, nil
@@ -245,6 +329,12 @@ func resourceBigQueryDatasetRead(d *schema.ResourceData, meta interface{}) error
 		d.Set("location", res.Location)
 	}
 
+	if res.Access != nil {
+		if err := d.Set("access", flattenAccessList(res.Access)); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -303,4 +393,87 @@ func parseBigQueryDatasetId(id string) (*bigQueryDatasetId, error) {
 	}
 
 	return nil, fmt.Errorf("Invalid BigQuery dataset specifier. Expecting {project}:{dataset-id}, got %s", id)
+}
+
+func expandAccessList(configured interface{}) []*bigquery.DatasetAccess {
+	access_list := make([]*bigquery.DatasetAccess, len(configured))
+
+	for i, element := range configured {
+		raw := element.(map[string]interface{})
+		access_list[i] = expandAccess(raw)
+	}
+
+	return access_list
+}
+
+func flattenAccessList(list []*bigquery.DatasetAccess) []map[string]interface{} {
+	flat_results := []map[string]interface{}
+
+	for i, access := range list {
+		flat_results[i] = flattenAccess(access)
+	}
+
+	return flat_results
+}
+
+func expandAccess(raw interface{}) *bigquery.DatasetAccess {
+	access := &bigquery.DatasetAccess{Role: raw["role"].(string)}
+
+	if v, ok := raw["domain"]; ok {
+		access.Domain = v.(string)
+	}
+
+	if v, ok := raw["group_by_email"]; ok {
+		access.GroupByEmail = v.(string)
+	}
+
+	if v, ok := raw["special_group"]; ok {
+		access.SpecialGroup = v.(string)
+	}
+
+	if v, ok := raw["user_by_email"]; ok {
+		access.UserByEmail = v.(string)
+	}
+
+	if v, ok := raw["view"]; ok {
+		access.View = &bigquery.TableReference{
+			DatasetId: raw["dataset_id"].(string),
+			ProjectId: raw["project_id"].(string),
+			TableId:   raw["table_id"].(string),
+		}
+	}
+
+	return access
+}
+
+func flattenAccess(access *bigquery.DatasetAccess) map[string]interface{} {
+	result := map[string]interface{}{"role": access.Role}
+
+	if access.Domain != "" {
+		result["domain"] = access.Domain
+	}
+
+	if access.GroupByEmail != "" {
+		result["group_by_email"] = access.GroupByEmail
+	}
+
+	if access.SpecialGroup != "" {
+		result["special_group"] = access.SpecialGroup
+	}
+
+	if access.UserByEmail != "" {
+		result["user_by_email"] = access.UserByEmail
+	}
+
+	if access.View != "" {
+		view = access.View
+
+		result["view"] = map[string]interface{}{
+			"dataset_id": view.DatasetId,
+			"project_id": view.ProjectId,
+			"table_id":   view.TableId,
+		}
+	}
+
+	return result
 }
