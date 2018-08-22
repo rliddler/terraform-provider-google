@@ -260,8 +260,8 @@ func resourceDataset(d *schema.ResourceData, meta interface{}) (*bigquery.Datase
 		dataset.Labels = labels
 	}
 
-	if v, ok = d.GetOk("access"); ok {
-		dataset.Access = expandAccessList(v)
+	if v, ok := d.GetOk("access"); ok {
+		dataset.Access = expandAccessList(v.([]interface{}))
 	}
 
 	return dataset, nil
@@ -395,7 +395,7 @@ func parseBigQueryDatasetId(id string) (*bigQueryDatasetId, error) {
 	return nil, fmt.Errorf("Invalid BigQuery dataset specifier. Expecting {project}:{dataset-id}, got %s", id)
 }
 
-func expandAccessList(configured interface{}) []*bigquery.DatasetAccess {
+func expandAccessList(configured []interface{}) []*bigquery.DatasetAccess {
 	access_list := make([]*bigquery.DatasetAccess, len(configured))
 
 	for i, element := range configured {
@@ -407,7 +407,7 @@ func expandAccessList(configured interface{}) []*bigquery.DatasetAccess {
 }
 
 func flattenAccessList(list []*bigquery.DatasetAccess) []map[string]interface{} {
-	flat_results := []map[string]interface{}
+	flat_results := make([]map[string]interface{}, len(list))
 
 	for i, access := range list {
 		flat_results[i] = flattenAccess(access)
@@ -417,29 +417,31 @@ func flattenAccessList(list []*bigquery.DatasetAccess) []map[string]interface{} 
 }
 
 func expandAccess(raw interface{}) *bigquery.DatasetAccess {
-	access := &bigquery.DatasetAccess{Role: raw["role"].(string)}
+	flat := raw.(map[string]interface{})
+	access := &bigquery.DatasetAccess{Role: flat["role"].(string)}
 
-	if v, ok := raw["domain"]; ok {
+	if v, ok := flat["domain"]; ok {
 		access.Domain = v.(string)
 	}
 
-	if v, ok := raw["group_by_email"]; ok {
+	if v, ok := flat["group_by_email"]; ok {
 		access.GroupByEmail = v.(string)
 	}
 
-	if v, ok := raw["special_group"]; ok {
+	if v, ok := flat["special_group"]; ok {
 		access.SpecialGroup = v.(string)
 	}
 
-	if v, ok := raw["user_by_email"]; ok {
+	if v, ok := flat["user_by_email"]; ok {
 		access.UserByEmail = v.(string)
 	}
 
-	if v, ok := raw["view"]; ok {
+	if v, ok := flat["view"]; ok {
+		flat_view := v.(map[string]interface{})
 		access.View = &bigquery.TableReference{
-			DatasetId: raw["dataset_id"].(string),
-			ProjectId: raw["project_id"].(string),
-			TableId:   raw["table_id"].(string),
+			DatasetId: flat_view["dataset_id"].(string),
+			ProjectId: flat_view["project_id"].(string),
+			TableId:   flat_view["table_id"].(string),
 		}
 	}
 
@@ -465,13 +467,11 @@ func flattenAccess(access *bigquery.DatasetAccess) map[string]interface{} {
 		result["user_by_email"] = access.UserByEmail
 	}
 
-	if access.View != "" {
-		view = access.View
-
+	if access.View != nil {
 		result["view"] = map[string]interface{}{
-			"dataset_id": view.DatasetId,
-			"project_id": view.ProjectId,
-			"table_id":   view.TableId,
+			"dataset_id": access.View.DatasetId,
+			"project_id": access.View.ProjectId,
+			"table_id":   access.View.TableId,
 		}
 	}
 

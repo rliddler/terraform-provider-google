@@ -113,7 +113,7 @@ func testAccCheckBigQueryDatasetExists(n string) resource.TestCheckFunc {
 
 func testAccCheckBigQueryDatasetExistsWithAccess(resourceId string, email string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resource[datasetId]
+		rs, ok := s.RootModule().Resources[resourceId]
 		if !ok {
 			return fmt.Errorf("Not found: %s", resourceId)
 		}
@@ -124,7 +124,7 @@ func testAccCheckBigQueryDatasetExistsWithAccess(resourceId string, email string
 
 		config := testAccProvider.Meta().(*Config)
 
-		found, err := config.cleintBigQuery.Datasets.Get(config.Project, rs.Primary.Attributes["dataset_id"]).Do()
+		found, err := config.clientBigQuery.Datasets.Get(config.Project, rs.Primary.Attributes["dataset_id"]).Do()
 		if err != nil {
 			return err
 		}
@@ -137,7 +137,8 @@ func testAccCheckBigQueryDatasetExistsWithAccess(resourceId string, email string
 			return fmt.Errorf("Access object missing on dataset")
 		}
 
-		if found.Access.UserByEmail != email {
+		access := found.Access[0]
+		if access.UserByEmail != email {
 			return fmt.Errorf("Value of Access.UserByEmail does not match expected value")
 		}
 
