@@ -150,12 +150,12 @@ func resourceBigQueryDataset() *schema.Resource {
 				Optional: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						// [Required] Describes the rights granted to the user specified
-						// by the other member of the access object. The following string
-						// values are supported: READER, WRITER, OWNER.
+						// [Required / Optional if view is set] Describes the rights granted
+						// to the user specified by the other member of the access object.
+						// The following string values are supported: READER, WRITER, OWNER.
 						"role": {
 							Type:     schema.TypeString,
-							Required: true,
+							Optional: true,
 						},
 						// [Pick one] An email address of a user to grant access to.
 						"user_by_email": {
@@ -261,7 +261,12 @@ func resourceDataset(d *schema.ResourceData, meta interface{}) (*bigquery.Datase
 	}
 
 	if v, ok := d.GetOk("access"); ok {
-		dataset.Access = expandAccessList(v.([]interface{}))
+		access_list, err := expandAccessList(v.([]interface{}))
+		if err != nil {
+			return nil, err
+		}
+
+		dataset.Access = access_list
 	}
 
 	return dataset, nil
@@ -395,30 +400,44 @@ func parseBigQueryDatasetId(id string) (*bigQueryDatasetId, error) {
 	return nil, fmt.Errorf("Invalid BigQuery dataset specifier. Expecting {project}:{dataset-id}, got %s", id)
 }
 
-func expandAccessList(configured []interface{}) []*bigquery.DatasetAccess {
-	access_list := make([]*bigquery.DatasetAccess, len(configured))
+func expandAccessList(configured []interface{}) ([]*bigquery.DatasetAccess, error) {
+	accessList := make([]*bigquery.DatasetAccess, len(configured))
 
 	for i, element := range configured {
 		raw := element.(map[string]interface{})
-		access_list[i] = expandAccess(raw)
+		access, err := expandAccess(raw)
+
+		if err != nil {
+			return nil, err
+		}
+
+		accessList[i] = access
 	}
 
-	return access_list
+	return accessList, nil
 }
 
 func flattenAccessList(list []*bigquery.DatasetAccess) []map[string]interface{} {
-	flat_results := make([]map[string]interface{}, len(list))
+	flatResults := make([]map[string]interface{}, len(list))
 
 	for i, access := range list {
-		flat_results[i] = flattenAccess(access)
+		flatResults[i] = flattenAccess(access)
 	}
 
-	return flat_results
+	return flatResults
 }
 
-func expandAccess(raw interface{}) *bigquery.DatasetAccess {
+func expandAccess(raw interface{}) (*bigquery.DatasetAccess, error) {
 	flat := raw.(map[string]interface{})
-	access := &bigquery.DatasetAccess{Role: flat["role"].(string)}
+	role := flat["role"].(string)
+
+	if role == "" {
+		if len(flat["view"].(map[string]interface{})) == 0 {
+			return nil, fmt.Errorf("Role is a required field unless you have specified a view. No role or view found")
+		}
+	}
+
+	access := &bigquery.DatasetAccess{Role: role}
 
 	if v, ok := flat["domain"]; ok {
 		access.Domain = v.(string)
@@ -438,14 +457,17 @@ func expandAccess(raw interface{}) *bigquery.DatasetAccess {
 
 	if v, ok := flat["view"]; ok {
 		flat_view := v.(map[string]interface{})
-		access.View = &bigquery.TableReference{
-			DatasetId: flat_view["dataset_id"].(string),
-			ProjectId: flat_view["project_id"].(string),
-			TableId:   flat_view["table_id"].(string),
+
+		if len(flat_view) > 0 {
+			access.View = &bigquery.TableReference{
+				DatasetId: flat_view["dataset_id"].(string),
+				ProjectId: flat_view["project_id"].(string),
+				TableId:   flat_view["table_id"].(string),
+			}
 		}
 	}
 
-	return access
+	return access, nil
 }
 
 func flattenAccess(access *bigquery.DatasetAccess) map[string]interface{} {
